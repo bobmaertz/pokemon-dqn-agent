@@ -151,13 +151,14 @@ class PokemonBlueEnv(gym.Env):
         mapNo = self.pyboy.memory[0xD35E]
         x_coord = self.pyboy.memory[0xD361]
         y_coord = self.pyboy.memory[0xD362]
-        curr = f"%d:%d".format(x_coord, y_coord)
+        loc = f"{mapNo}:{x_coord}:{y_coord}"
         
-        mem = self.explore_map.get(mapNo, 0)
-        if mem != 0 and mem != curr: 
+        try:
+            mem = self.explore_map[loc]
+            return 0 
+        except KeyError: 
+            self.explore_map[loc] = True
             return 1.0 
-        
-        self.explore_map[mapNo] = hash
         return 0
     
     def _is_episode_done(self):
