@@ -5,6 +5,9 @@ import pyboy
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
+from collections import deque 
+
 import random
 from pyboy.utils import (
     WindowEvent,
@@ -38,7 +41,10 @@ class PokemonBlueEnv(gym.Env):
         
         self.render_mode = render_mode
         self._current_state = None
+        self.screen_memory = []
         
+        self.explore_map = {}
+
     def step(self, action):
         """
         Execute one time step within the environment
@@ -61,10 +67,13 @@ class PokemonBlueEnv(gym.Env):
         
         # Capture screen state
         screen = self._get_screen()
-        print(screen)
+
         # Compute reward (to be refined based on game mechanics)
         reward = self._compute_reward()
         
+        # Remember scene for later rewards. 
+        self.screen_memory.append(screen)
+
         # Check for episode termination
         terminated = self._is_episode_done()
         
@@ -95,6 +104,8 @@ class PokemonBlueEnv(gym.Env):
         self.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT)
         self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
         self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
+        self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_SELECT)
+        self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
 
         # Apply selected action
         if actions[action] == 'up':
@@ -109,6 +120,7 @@ class PokemonBlueEnv(gym.Env):
             self.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
         elif actions[action] == 'B':
             self.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)
+   
     def _get_screen(self):
         """
         Capture and process game screen
@@ -128,12 +140,25 @@ class PokemonBlueEnv(gym.Env):
         This is a placeholder and should be customized based on 
         specific training objectives
         """
-        # Example rewards:
-        # - Gaining experience
-        # - Winning battles
-        # - Progressing in the game
+    
+
+        # Inspiration for this came from: https://github.com/PWhiddy/PokemonRedExperiments/blob/master/v2/red_gym_env_v2.py#L334-L335
+        # More Background: 
+        #     - https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
+        #     - https://datacrystal.tcrf.net/wiki/Pok%C3%A9mon_Red_and_Blue/RAM_map#Map_Header
+        # reward = 0.0 
+
+        mapNo = self.pyboy.memory[0xD35E]
+        x_coord = self.pyboy.memory[0xD361]
+        y_coord = self.pyboy.memory[0xD362]
+        curr = f"%d:%d".format(x_coord, y_coord)
         
-        return 0.0
+        mem = self.explore_map.get(mapNo, 0)
+        if mem != 0 and mem != curr: 
+            return 1.0 
+        
+        self.explore_map[mapNo] = hash
+        return 0
     
     def _is_episode_done(self):
         """
@@ -142,6 +167,10 @@ class PokemonBlueEnv(gym.Env):
         Returns:
             bool: Whether episode is terminated
         """
+
+        self.steps = self.steps + 1
+        if self.steps > 10000:
+            return True 
         # Check for game over conditions
         return False
     
@@ -152,6 +181,7 @@ class PokemonBlueEnv(gym.Env):
         Returns:
             dict: Game state metrics
         """
+        
         # Extract memory values, player position, etc.
         return {}
     
@@ -164,8 +194,18 @@ class PokemonBlueEnv(gym.Env):
         """
         super().reset(seed=seed)
         
+        self.screen_memory = []
+        self.steps = 0 
         # Reset PyBoy to start of game
         #self.pyboy.game_wrapper.reset_game()
+        # self.pyboy.stop(False)
+        # self.pyboy.game_wrapper.
+        # # There should be an option here to reset to a saved state or to reset the game. 
+        # if self.state_file: 
+        #    with open(self.state_file, "rb") as f:
+        #         self.pyboy.load_state(f)
+
+
 
         initial_screen = self._get_screen()
         return initial_screen, {}
@@ -216,6 +256,8 @@ class DeepQLearningAgent:
             nn.ReLU(),
             nn.Linear(256, self.action_size)
         )
+
+        #TODO: Add optimizer
         return model
     
     def act(self, state):
@@ -229,11 +271,29 @@ class DeepQLearningAgent:
         q_values = self.model(state_tensor)
         return torch.argmax(q_values).item()
     
+    def update_memory(self, state, action, reward, done, next_state):
+        self.memory.append([state, action, reward, done, next_state])
+    
     def train(self, state, action, reward, next_state, done):
         """
         Train the agent using Deep Q-Learning
         """
-        pass  # Implement full training logic
+        return 
+        self.memory.append((state, action, reward, done, next_state))
+        epsilon = math.pow(epsilon, 1/total_steps)
+        minibatch = self.memory.sample(self.n_minibatch)
+        for m_state, m_action, m_reward, m_done, m_next_state in minibatch:
+            if m_done: 
+                y = m_reward
+            else:
+                y =  m_reward + self.gamma * np.amax(self.model.predict(next_state)[0])
+            
+            y_1 = self.model.predict(m_state)
+            y_1[0][m_action] = y
+            out = self.model.fit(m_state, y_1, verbose=0)
+
+            total_loss += out.history.get('loss')[0]
+         
 
 def main():
     # Path to Pokémon Blue ROM (you'll need to provide this)
@@ -249,7 +309,7 @@ def main():
     )
     
     # Training loop
-    num_episodes = 1000
+    num_episodes = 1
     for episode in range(num_episodes):
         state, _ = env.reset()
         done = False
