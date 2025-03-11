@@ -1,17 +1,23 @@
-import numpy as np
+import random
+from collections import deque
+
 import gymnasium as gym
-from gymnasium import spaces
+import numpy as np
 import pyboy
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from gymnasium import spaces
+from pyboy.utils import WindowEvent
 
-from collections import deque 
+REPLAY_MEMORY_SIZE = 500
+STEPS_PER_EPISODE = 10000
+NUM_EPISODES = 100
+MODEL_NAME = "255_8_Initial"
 
-import random
-from pyboy.utils import (
-    WindowEvent,
-)
+# Path to legally obtained Pokémon ROM
+ROM_PATH = './POKEMONR.GBC'
+STATE_FILE = './state_file.state'
 class PokemonBlueEnv(gym.Env):
     """
     Custom Gymnasium environment for Pokémon Blue 
@@ -21,12 +27,11 @@ class PokemonBlueEnv(gym.Env):
         super().__init__()
 
         # Initialize PyBoy emulator
-        self.pyboy = pyboy.PyBoy(rom_path)
-       
-        if state_file: 
-            with open(state_file, "rb") as f:
-                self.pyboy.load_state(f)
-                
+        self.pyboy = pyboy.PyBoy(rom_path,window="null")
+        self.pyboy.set_emulation_speed(16)
+
+        self.state_file = state_file
+        self.load_saved_state()
         # Define action and observation spaces
         # Actions could include:
         # 0: Up, 1: Down, 2: Left, 3: Right, 4: A Button, 5: B Button, 6: Start, 7: Select
@@ -42,9 +47,17 @@ class PokemonBlueEnv(gym.Env):
         self.render_mode = render_mode
         self._current_state = None
         self.screen_memory = []
-        
+        self.steps = 0 
         self.explore_map = {}
 
+    def load_saved_state(self):
+        """
+        Load the saved state for the environment
+        """
+        if self.state_file:
+            with open(self.state_file, "rb") as f:
+                self.pyboy.load_state(f)
+                
     def step(self, action):
         """
         Execute one time step within the environment
@@ -88,7 +101,7 @@ class PokemonBlueEnv(gym.Env):
         """
         actions = {
             0: 'up',
-            1: 'down', 
+            1: 'down',
             2: 'left',
             3: 'right',
             4: 'A',
@@ -104,8 +117,8 @@ class PokemonBlueEnv(gym.Env):
         self.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT)
         self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
         self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
-        self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_SELECT)
-        self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
+        # self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_SELECT)
+        # self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
 
         # Apply selected action
         if actions[action] == 'up':
@@ -120,7 +133,11 @@ class PokemonBlueEnv(gym.Env):
             self.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
         elif actions[action] == 'B':
             self.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)
-   
+        # elif actions[action] == 'start':
+        #     self.pyboy.send_input(WindowEvent.PRESS_BUTTON_START)
+        # elif actions[action] == 'select':
+        #     self.pyboy.send_input(WindowEvent.PRESS_BUTTON_SELECT)
+    
     def _get_screen(self):
         """
         Capture and process game screen
@@ -148,13 +165,13 @@ class PokemonBlueEnv(gym.Env):
         #     - https://datacrystal.tcrf.net/wiki/Pok%C3%A9mon_Red_and_Blue/RAM_map#Map_Header
         # reward = 0.0 
 
-        mapNo = self.pyboy.memory[0xD35E]
+        map_num = self.pyboy.memory[0xD35E]
         x_coord = self.pyboy.memory[0xD361]
         y_coord = self.pyboy.memory[0xD362]
-        loc = f"{mapNo}:{x_coord}:{y_coord}"
+        loc = f"{map_num}:{x_coord}:{y_coord}"
         
         try:
-            mem = self.explore_map[loc]
+            self.explore_map[loc]
             return 0 
         except KeyError: 
             self.explore_map[loc] = True
@@ -170,8 +187,8 @@ class PokemonBlueEnv(gym.Env):
         """
 
         self.steps = self.steps + 1
-        if self.steps > 10000:
-            return True 
+        if self.steps > STEPS_PER_EPISODE:
+            return True
         # Check for game over conditions
         return False
     
@@ -197,16 +214,14 @@ class PokemonBlueEnv(gym.Env):
         
         self.screen_memory = []
         self.steps = 0 
-        # Reset PyBoy to start of game
-        #self.pyboy.game_wrapper.reset_game()
-        # self.pyboy.stop(False)
-        # self.pyboy.game_wrapper.
-        # # There should be an option here to reset to a saved state or to reset the game. 
-        # if self.state_file: 
-        #    with open(self.state_file, "rb") as f:
-        #         self.pyboy.load_state(f)
+        self.close()
 
+        if options is None or not options["initial_run"]:
+            # Reset PyBoy to start of game
+            self.pyboy.game_wrapper.reset_game()
 
+        ## Reload from our saved state
+        self.load_saved_state()
 
         initial_screen = self._get_screen()
         return initial_screen, {}
@@ -231,16 +246,30 @@ class DeepQLearningAgent:
     def __init__(self, state_size, action_size):
         self.state_size = state_size
         self.action_size = action_size
-        self.memory = []
+        self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
         self.gamma = 0.95    # discount rate
         self.epsilon = 1.0   # exploration rate
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
         self.learning_rate = 0.001
-        
+
+        if torch.mps.is_available():
+            self.device = torch.device("mps")
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+
         # Neural Network for Q-learning
-        self.model = self._build_model()
-    
+        self.policy_model = self._build_model()
+        self.policy_model.to(self.device)
+
+        self.target_model = self._build_model()
+        self.target_model.load_state_dict(self.policy_model.state_dict())
+        self.target_model.to(self.device)
+
+        self.optimizer = optim.AdamW(self.policy_model.parameters(), lr=self.learning_rate, amsgrad=True)
+
     def _build_model(self):
         """
         Create Deep Neural Network for Q-Learning
@@ -258,9 +287,8 @@ class DeepQLearningAgent:
             nn.Linear(256, self.action_size)
         )
 
-        #TODO: Add optimizer
         return model
-    
+
     def act(self, state):
         """
         Choose action using epsilon-greedy strategy
@@ -268,51 +296,88 @@ class DeepQLearningAgent:
         if np.random.rand() <= self.epsilon:
             return random.randrange(self.action_size)
         
-        state_tensor = torch.FloatTensor(state).unsqueeze(0)
-        q_values = self.model(state_tensor)
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device=self.device)
+        q_values = self.policy_model(state_tensor)
         return torch.argmax(q_values).item()
     
-    def update_memory(self, state, action, reward, done, next_state):
-        self.memory.append([state, action, reward, done, next_state])
+    def update_memory(self, transition):
+        """
+        Update the replay memory with the latest transition tuple 
+        - state, action, reward, next_state, done
+        """
+        self.replay_memory.append(transition)
+
+    def update_target_network(self):
+        """
+        Update the target network with the policy network weights
+        """
+        self.target_model.load_state_dict(self.policy_model.state_dict())
     
-    def train(self, state, action, reward, next_state, done):
+    def train(self):
         """
         Train the agent using Deep Q-Learning
         """
-        return 
-        self.memory.append((state, action, reward, done, next_state))
-        epsilon = math.pow(epsilon, 1/total_steps)
-        minibatch = self.memory.sample(self.n_minibatch)
-        for m_state, m_action, m_reward, m_done, m_next_state in minibatch:
-            if m_done: 
-                y = m_reward
-            else:
-                y =  m_reward + self.gamma * np.amax(self.model.predict(next_state)[0])
-            
-            y_1 = self.model.predict(m_state)
-            y_1[0][m_action] = y
-            out = self.model.fit(m_state, y_1, verbose=0)
 
-            total_loss += out.history.get('loss')[0]
-         
+        # Dont want to train on memory less than REPLAY_MEMORY_SIZE, not a big enough batch. 
+        if len(self.replay_memory) < REPLAY_MEMORY_SIZE:
+            return
+        
+        minibatch = random.sample(self.replay_memory, REPLAY_MEMORY_SIZE)
+        
+        ## Reviewing algorithm from https://www.youtube.com/watch?v=qfovbG84EBg&t=335s
+        #TODO: Double check normalization of 255 
+        current_states = torch.FloatTensor(np.array([transition[0] for transition in minibatch])/255).to(self.device)
+        actions = torch.LongTensor([transition[1] for transition in minibatch]).to(self.device)
+        rewards = torch.FloatTensor([transition[2] for transition in minibatch]).to(self.device)
+        next_states = torch.FloatTensor(np.array([transition[3] for transition in minibatch])/255).to(self.device)
+        dones = torch.FloatTensor([transition[4] for transition in minibatch]).to(self.device)
+       
+        # Compute Q-values for current states
+        curr_q = self.policy_model(current_states)
+        curr_q = curr_q.gather(1, actions.unsqueeze(1)).squeeze(1)
+        
+        # Compute Q-values for next states using target network
+        next_q = self.target_model(next_states).detach()
+        max_next_q = next_q.max(1)[0]
+        
+        # Compute target Q-values
+        target_q = rewards + (self.gamma * max_next_q * (1 - dones))
+        
+        # Compute loss
+        loss = nn.MSELoss()(curr_q, target_q)
+
+        # Optimize the model
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        
+        # Update target network
+        self.update_target_network()
+
+    def save(self, name):
+        """
+        Save model weights
+        """
+        # Save the model's state_dict
+        model_filename = f"{name}_model_state_dict.pth"
+        torch.save(self.target_model.state_dict(), model_filename)
+
+        optimizer_filename = f"{name}_optimizer_state_dict.pth"
+        torch.save(self.optimizer.state_dict(), optimizer_filename)     
 
 def main():
-    # Path to Pokémon Blue ROM (you'll need to provide this)
-    ROM_PATH = './POKEMONR.GBC'
-    STATE_FILE = './state_file.state'
     # Create environment
     env = PokemonBlueEnv(ROM_PATH, STATE_FILE)
-    
+
     # Initialize agent
     agent = DeepQLearningAgent(
-        state_size=env.observation_space.shape, 
+        state_size=env.observation_space.shape,
         action_size=env.action_space.n
     )
-    
+   
     # Training loop
-    num_episodes = 1
-    for episode in range(num_episodes):
-        state, _ = env.reset()
+    for episode in range(NUM_EPISODES):
+        state, _ = env.reset(options={"initial_run":True})
         done = False
         total_reward = 0
         
@@ -320,17 +385,21 @@ def main():
             action = agent.act(state)
             next_state, reward, done, _, _ = env.step(action)
             
+            agent.update_memory((state, action, reward, next_state, done))
+            
             # Train agent
-            agent.train(state, action, reward, next_state, done)
+            agent.train()
             
             state = next_state
             total_reward += reward
-        
+
         print(f"Episode {episode}: Total Reward = {total_reward}")
         
         # Decay exploration rate
         if agent.epsilon > agent.epsilon_min:
             agent.epsilon *= agent.epsilon_decay
+
+    agent.save(MODEL_NAME)
 
 if __name__ == '__main__':
     main()
