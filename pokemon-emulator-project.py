@@ -1,5 +1,6 @@
 import random
-from collections import deque
+import time 
+from collections import deque, namedtuple
 
 import gymnasium as gym
 import numpy as np
@@ -10,7 +11,7 @@ import torch.optim as optim
 from gymnasium import spaces
 from pyboy.utils import WindowEvent
 
-REPLAY_MEMORY_SIZE = 500
+REPLAY_MEMORY_SIZE = 400
 STEPS_PER_EPISODE = 10000
 NUM_EPISODES = 100
 MODEL_NAME = "255_8_Initial"
@@ -18,37 +19,55 @@ MODEL_NAME = "255_8_Initial"
 # Path to legally obtained Pokémon ROM
 ROM_PATH = './POKEMONR.GBC'
 STATE_FILE = './state_file.state'
+
+ACTION_MAP = {
+    0: 'up',
+    1: 'down',
+    2: 'left',
+    3: 'right',
+    4: 'A',
+    5: 'B',
+    # 6: 'start',
+    # 7: 'select'
+}
+
+Transition = namedtuple('Transition',
+                        ('state', 'action', 'reward','next_state', 'done'))
+
+
 class PokemonBlueEnv(gym.Env):
     """
     Custom Gymnasium environment for Pokémon Blue 
     to facilitate deep learning training
     """
-    def __init__(self, rom_path, state_file=None, render_mode=None):
+    def __init__(self, rom_path, state_file=None, render_mode="null", emulation_speed=1):
         super().__init__()
 
-        # Initialize PyBoy emulator
-        self.pyboy = pyboy.PyBoy(rom_path,window="null")
-        self.pyboy.set_emulation_speed(16)
-
+        self.rom_path = rom_path
+        self.emulation_speed = emulation_speed
+        self.render_mode = render_mode
         self.state_file = state_file
+        self._current_state = None
+        self.screen_memory = []
+        self.steps = 0
+        self.explore_map = {}
+
+        # Initialize PyBoy emulator
+        self.pyboy = pyboy.PyBoy(self.rom_path, window=self.render_mode, sound=False)
+        self.pyboy.set_emulation_speed(self.emulation_speed)
+
+        # Load saved state if set
         self.load_saved_state()
+
         # Define action and observation spaces
-        # Actions could include:
-        # 0: Up, 1: Down, 2: Left, 3: Right, 4: A Button, 5: B Button, 6: Start, 7: Select
-        self.action_space = spaces.Discrete(8)
-        
+        self.action_space = spaces.Discrete(len(ACTION_MAP))
+       
         # Observation space: screen pixels and game state
         self.observation_space = spaces.Box(
             low=0, high=255, 
             shape=(1, 144, 160),  # Game Boy screen dimensions
             dtype=np.uint8
         )
-        
-        self.render_mode = render_mode
-        self._current_state = None
-        self.screen_memory = []
-        self.steps = 0 
-        self.explore_map = {}
 
     def load_saved_state(self):
         """
@@ -85,7 +104,7 @@ class PokemonBlueEnv(gym.Env):
         reward = self._compute_reward()
         
         # Remember scene for later rewards. 
-        self.screen_memory.append(screen)
+        # self.screen_memory.append(screen)
 
         # Check for episode termination
         terminated = self._is_episode_done()
@@ -99,45 +118,9 @@ class PokemonBlueEnv(gym.Env):
         """
         Translate action to PyBoy input
         """
-        actions = {
-            0: 'up',
-            1: 'down',
-            2: 'left',
-            3: 'right',
-            4: 'A',
-            5: 'B',
-            6: 'start',
-            7: 'select'
-        }
-        
-        # Reset previous inputs
-        self.pyboy.send_input(WindowEvent.RELEASE_ARROW_UP)
-        self.pyboy.send_input(WindowEvent.RELEASE_ARROW_DOWN)
-        self.pyboy.send_input(WindowEvent.RELEASE_ARROW_LEFT)
-        self.pyboy.send_input(WindowEvent.RELEASE_ARROW_RIGHT)
-        self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_A)
-        self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_B)
-        # self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_SELECT)
-        # self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
+        self.pyboy.button(ACTION_MAP[action])
 
-        # Apply selected action
-        if actions[action] == 'up':
-            self.pyboy.send_input(WindowEvent.PRESS_ARROW_UP)
-        elif actions[action] == 'down':
-            self.pyboy.send_input(WindowEvent.PRESS_ARROW_DOWN)
-        elif actions[action] == 'left':
-            self.pyboy.send_input(WindowEvent.PRESS_ARROW_LEFT)
-        elif actions[action] == 'right':
-            self.pyboy.send_input(WindowEvent.PRESS_ARROW_RIGHT)
-        elif actions[action] == 'A':
-            self.pyboy.send_input(WindowEvent.PRESS_BUTTON_A)
-        elif actions[action] == 'B':
-            self.pyboy.send_input(WindowEvent.PRESS_BUTTON_B)
-        # elif actions[action] == 'start':
-        #     self.pyboy.send_input(WindowEvent.PRESS_BUTTON_START)
-        # elif actions[action] == 'select':
-        #     self.pyboy.send_input(WindowEvent.PRESS_BUTTON_SELECT)
-    
+
     def _get_screen(self):
         """
         Capture and process game screen
@@ -157,14 +140,11 @@ class PokemonBlueEnv(gym.Env):
         This is a placeholder and should be customized based on 
         specific training objectives
         """
-    
-
         # Inspiration for this came from: https://github.com/PWhiddy/PokemonRedExperiments/blob/master/v2/red_gym_env_v2.py#L334-L335
         # More Background: 
         #     - https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
         #     - https://datacrystal.tcrf.net/wiki/Pok%C3%A9mon_Red_and_Blue/RAM_map#Map_Header
         # reward = 0.0 
-
         map_num = self.pyboy.memory[0xD35E]
         x_coord = self.pyboy.memory[0xD361]
         y_coord = self.pyboy.memory[0xD362]
@@ -199,10 +179,10 @@ class PokemonBlueEnv(gym.Env):
         Returns:
             dict: Game state metrics
         """
-        
+       
         # Extract memory values, player position, etc.
         return {}
-    
+   
     def reset(self, seed=None, options=None):
         """
         Reset the environment to initial state
@@ -213,19 +193,22 @@ class PokemonBlueEnv(gym.Env):
         super().reset(seed=seed)
         
         self.screen_memory = []
-        self.steps = 0 
-        self.close()
+        self.steps = 0
+        self.explore_map = {}
 
-        if options is None or not options["initial_run"]:
-            # Reset PyBoy to start of game
-            self.pyboy.game_wrapper.reset_game()
+        # Perform a complete stop
+        self.pyboy.stop(save=False)
+
+        # Reinitialize PyBoy from scratch 
+        self.pyboy = pyboy.PyBoy(self.rom_path, window=self.render_mode, sound=False)
+        self.pyboy.set_emulation_speed(self.emulation_speed) 
 
         ## Reload from our saved state
         self.load_saved_state()
 
         initial_screen = self._get_screen()
         return initial_screen, {}
-    
+  
     def render(self):
         """
         Render the environment
@@ -252,6 +235,7 @@ class DeepQLearningAgent:
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
         self.learning_rate = 0.001
+        self._train_counter = 0
 
         if torch.mps.is_available():
             self.device = torch.device("mps")
@@ -352,8 +336,10 @@ class DeepQLearningAgent:
         self.optimizer.step()
         
         # Update target network
-        self.update_target_network()
-
+        # self.update_target_network()
+        if self._train_counter % 100 == 0:
+            self.update_target_network()
+        
     def save(self, name):
         """
         Save model weights
@@ -366,6 +352,10 @@ class DeepQLearningAgent:
         torch.save(self.optimizer.state_dict(), optimizer_filename)     
 
 def main():
+    print(f"Run Title: {MODEL_NAME}")
+    start_time = time.time()
+    print(f"Start time: {start_time}")
+    
     # Create environment
     env = PokemonBlueEnv(ROM_PATH, STATE_FILE)
 
@@ -385,7 +375,7 @@ def main():
             action = agent.act(state)
             next_state, reward, done, _, _ = env.step(action)
             
-            agent.update_memory((state, action, reward, next_state, done))
+            agent.update_memory(Transition(state, action, reward, next_state, done))
             
             # Train agent
             agent.train()
@@ -400,6 +390,10 @@ def main():
             agent.epsilon *= agent.epsilon_decay
 
     agent.save(MODEL_NAME)
+
+    end_time = time.time()
+    print(f"End time: {end_time}")
+    print(f"Execution time: {end_time - start_time} seconds")
 
 if __name__ == '__main__':
     main()
