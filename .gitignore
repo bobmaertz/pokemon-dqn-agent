@@ -2,4 +2,7 @@ venv
 screenshots
 
 **/*.GBC
+**/*.GBC.ram
+**/*.pth
+
 *.state
