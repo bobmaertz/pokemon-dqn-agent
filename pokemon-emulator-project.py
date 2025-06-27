@@ -1,7 +1,7 @@
 import random
-import time 
 from collections import deque, namedtuple
 
+import wandb
 import gymnasium as gym
 import numpy as np
 import pyboy
@@ -9,16 +9,16 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from gymnasium import spaces
-from pyboy.utils import WindowEvent
+import os
+import argparse
 
 REPLAY_MEMORY_SIZE = 400
 STEPS_PER_EPISODE = 10000
-NUM_EPISODES = 100
-MODEL_NAME = "255_8_Initial"
 
 # Path to legally obtained Pokémon ROM
 ROM_PATH = './POKEMONR.GBC'
-STATE_FILE = './state_file.state'
+STATE_FILE = './env_state/game_start.state'
+MODEL_NAME = "pokemon_blue_dqn"
 
 ACTION_MAP = {
     0: 'up',
@@ -40,13 +40,14 @@ class PokemonBlueEnv(gym.Env):
     Custom Gymnasium environment for Pokémon Blue 
     to facilitate deep learning training
     """
-    def __init__(self, rom_path, state_file=None, render_mode="null", emulation_speed=1):
+    def __init__(self, rom_path, state_file=None, render_mode="null", emulation_speed=0, steps_per_episode=STEPS_PER_EPISODE):
         super().__init__()
 
         self.rom_path = rom_path
         self.emulation_speed = emulation_speed
         self.render_mode = render_mode
         self.state_file = state_file
+        self.steps_per_episode = steps_per_episode
         self._current_state = None
         self.screen_memory = []
         self.steps = 0
@@ -95,8 +96,9 @@ class PokemonBlueEnv(gym.Env):
         self._take_action(action)
         
         # Advance emulator frame
-        self.pyboy.tick()
-        
+        self.pyboy.tick(24, render=False, sound=False)
+        self.pyboy.tick(1, render=True, sound=False)
+
         # Capture screen state
         screen = self._get_screen()
 
@@ -167,7 +169,7 @@ class PokemonBlueEnv(gym.Env):
         """
 
         self.steps = self.steps + 1
-        if self.steps > STEPS_PER_EPISODE:
+        if self.steps > self.steps_per_episode:
             return True
         # Check for game over conditions
         return False
@@ -226,14 +228,15 @@ class DeepQLearningAgent:
     """
     Deep Q-Learning agent for Pokémon Blue
     """
-    def __init__(self, state_size, action_size):
+    def __init__(self, state_size, action_size, replay_memory_size=REPLAY_MEMORY_SIZE):
         self.state_size = state_size
         self.action_size = action_size
-        self.replay_memory = deque(maxlen=REPLAY_MEMORY_SIZE)
+        self.replay_memory_size=replay_memory_size
+        self.replay_memory = deque(maxlen=self.replay_memory_size)
         self.gamma = 0.95    # discount rate
         self.epsilon = 1.0   # exploration rate
         self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
+        self.epsilon_decay = 0.9995
         self.learning_rate = 0.001
         self._train_counter = 0
 
@@ -254,6 +257,7 @@ class DeepQLearningAgent:
 
         self.optimizer = optim.AdamW(self.policy_model.parameters(), lr=self.learning_rate, amsgrad=True)
 
+
     def _build_model(self):
         """
         Create Deep Neural Network for Q-Learning
@@ -262,15 +266,17 @@ class DeepQLearningAgent:
             nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
+
             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
+
             nn.Flatten(),
             nn.Linear(64 * 36 * 40, 256),
             nn.ReLU(),
             nn.Linear(256, self.action_size)
         )
-
+       
         return model
 
     def act(self, state):
@@ -301,12 +307,11 @@ class DeepQLearningAgent:
         """
         Train the agent using Deep Q-Learning
         """
-
         # Dont want to train on memory less than REPLAY_MEMORY_SIZE, not a big enough batch. 
-        if len(self.replay_memory) < REPLAY_MEMORY_SIZE:
+        if len(self.replay_memory) < self.replay_memory_size:
             return
         
-        minibatch = random.sample(self.replay_memory, REPLAY_MEMORY_SIZE)
+        minibatch = random.sample(self.replay_memory, 64)
         
         ## Reviewing algorithm from https://www.youtube.com/watch?v=qfovbG84EBg&t=335s
         #TODO: Double check normalization of 255 
@@ -336,10 +341,11 @@ class DeepQLearningAgent:
         self.optimizer.step()
         
         # Update target network
-        # self.update_target_network()
-        if self._train_counter % 100 == 0:
+        if self._train_counter % 250 == 0:
             self.update_target_network()
         
+        self._train_counter += 1  
+
     def save(self, name):
         """
         Save model weights
@@ -352,48 +358,75 @@ class DeepQLearningAgent:
         torch.save(self.optimizer.state_dict(), optimizer_filename)     
 
 def main():
-    print(f"Run Title: {MODEL_NAME}")
-    start_time = time.time()
-    print(f"Start time: {start_time}")
     
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--replay_memory_size', type=int, default=REPLAY_MEMORY_SIZE, help='Replay memory size')
+    parser.add_argument('--steps_per_episode', type=int, default=STEPS_PER_EPISODE, help='Steps per episode')
+    parser.add_argument('--num_episodes', type=int, default=10, help='Number of episodes')
+    parser.add_argument('--rom_path', type=str, default=ROM_PATH, help='Path to Pokémon ROM')
+    parser.add_argument('--state_file', type=str, default=STATE_FILE, help='Path to emulator state file')
+    parser.add_argument('--model_name', type=str, default=MODEL_NAME, help='Model name for saving')
+    parser.add_argument('--wandb_entity', type=str, default=os.environ.get('WANDB_ENTITY', ''), help='Weights & Biases entity')
+    parser.add_argument('--wandb_project', type=str, default=os.environ.get('WANDB_PROJECT', ''), help='Weights & Biases project')
+    args = parser.parse_args()
+
+    num_episodes = args.num_episodes
+    model_name = args.model_name
     # Create environment
-    env = PokemonBlueEnv(ROM_PATH, STATE_FILE)
+    env = PokemonBlueEnv(args.rom_path, args.state_file)
 
     # Initialize agent
     agent = DeepQLearningAgent(
         state_size=env.observation_space.shape,
-        action_size=env.action_space.n
+        action_size=env.action_space.n,
+        replay_memory_size= args.replay_memory_size
     )
-   
+
+    run = wandb.init(
+        entity=args.wandb_entity,
+        project=args.wandb_project,
+        config={
+            "learning_rate": agent.learning_rate,
+            "device": str(agent.device),
+            "epsilon": agent.epsilon,
+            "epsilon_decay": agent.epsilon_decay,
+            "gamma": agent.gamma,
+            "batch_num": 64,
+            "replay_memory_size": agent.replay_memory_size,
+            "architecture": "CNN",
+            "epochs": num_episodes,
+        },
+    )
     # Training loop
-    for episode in range(NUM_EPISODES):
+    for episode in range(num_episodes):
         state, _ = env.reset(options={"initial_run":True})
         done = False
-        total_reward = 0
+        cumulative_reward = 0
         
+        train_count = 0 
         while not done:
+            train_count += 1
+
             action = agent.act(state)
             next_state, reward, done, _, _ = env.step(action)
             
             agent.update_memory(Transition(state, action, reward, next_state, done))
             
-            # Train agent
-            agent.train()
-            
-            state = next_state
-            total_reward += reward
+            if train_count % 4 == 0: 
+                agent.train()
+                train_count = 0 
 
-        print(f"Episode {episode}: Total Reward = {total_reward}")
-        
+            state = next_state
+            cumulative_reward += reward
+
+        run.log({'reward': cumulative_reward, 'episode': episode})
         # Decay exploration rate
         if agent.epsilon > agent.epsilon_min:
             agent.epsilon *= agent.epsilon_decay
 
-    agent.save(MODEL_NAME)
+    agent.save(model_name)
 
-    end_time = time.time()
-    print(f"End time: {end_time}")
-    print(f"Execution time: {end_time - start_time} seconds")
+    run.finish()
 
 if __name__ == '__main__':
     main()

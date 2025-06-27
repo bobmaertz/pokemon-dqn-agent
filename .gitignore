@@ -1,5 +1,6 @@
 venv 
 screenshots
+wandb
 
 **/*.GBC
 **/*.GBC.ram
