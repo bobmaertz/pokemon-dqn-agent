@@ -387,7 +387,7 @@ class DeepQLearningAgent:
 
 def main():
     '''
-    Main function to train a Deep Q-Learning 
+    Main function to train a Deep Q-Learning
     agent on the Pokémon Blue environment.
     '''
     parser = argparse.ArgumentParser()

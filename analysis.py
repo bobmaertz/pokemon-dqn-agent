@@ -34,15 +34,24 @@ fig, ax = plt.subplots()
 ax.set_title("Agent Movement Over Time")
 ax.set_xlabel("X")
 ax.set_ylabel("Y")
-ax.set_xlim(min(x)-2, max(x)+2)
-ax.set_ylim(min(y)-2, max(y)+2)
+ax.set_xlim(min(x) - 2, max(x) + 2)
+ax.set_ylim(min(y) - 2, max(y) + 2)
 ax.grid(True)
 
 line, = ax.plot([], [], 'bo-', lw=2)
 point, = ax.plot([], [], 'ro', markersize=8)
 
 # Add a text annotation for the step index on the right side
-step_text = ax.text(0.98, 0.95, '', transform=ax.transAxes, fontsize=12, color='purple', ha='right', va='top')
+step_text = ax.text(
+    0.98,
+    0.95,
+    '',
+    transform=ax.transAxes,
+    fontsize=12,
+    color='purple',
+    ha='right',
+    va='top')
+
 
 def init():
     line.set_data([], [])
@@ -50,16 +59,18 @@ def init():
     step_text.set_text('')
     return line, point, step_text
 
+
 def update(frame):
     # Ensure frame does not exceed the length of x or y
     if frame >= len(x):
         frame = len(x) - 1
-    line.set_data(x[:frame+1], y[:frame+1])
+    line.set_data(x[:frame + 1], y[:frame + 1])
     point.set_data([x[frame]], [y[frame]])  # Wrap in list to ensure sequence
     # Show step and map/frame number
     map_num = coords[frame][0] if coords and frame < len(coords) else 'N/A'
     step_text.set_text(f"Step: {frame}\nMap Num: {map_num}")
     return line, point, step_text
+
 
 ani = animation.FuncAnimation(
     fig, update, frames=len(x), init_func=init, blit=True, interval=1, repeat=False

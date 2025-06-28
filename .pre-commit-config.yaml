@@ -1,0 +1,13 @@
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/hhatto/autopep8
+    rev: v2.3.2 
+    hooks:
+      - id: autopep8
+        args:
+          - "-i"
+          - "--aggressive"
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.27.2
+    hooks:
+      - id: gitleaks
