@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1
 
 # Install Python and other dependencies
 RUN apt-get update && \
-    apt-get install -y python3 python3-pip python3-venv git libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 && \
+    apt-get install -y python3 python3-pip python3-venv git libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libjpeg-dev zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Set the working directory
