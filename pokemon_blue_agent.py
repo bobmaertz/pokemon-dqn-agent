@@ -463,8 +463,6 @@ def main():
             "architecture": "CNN",
             "epochs": num_episodes,
         },
-        # TODO: Remove - debugging some issues with high CPU usage
-        settings=wandb.Settings(_disable_stats=True)
     )
     # Training loop
     for episode in range(num_episodes):
