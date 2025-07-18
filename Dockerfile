@@ -21,4 +21,7 @@ RUN python3 -m pip install --upgrade pip && \
 
 COPY . .
 
+# Declare env_state as a volume for persistence and host access
+VOLUME ["/workspace/env_state"]
+
 ENTRYPOINT ["python3", "pokemon_blue_agent.py"]
