@@ -422,6 +422,11 @@ def main():
         default=MODEL_NAME,
         help='Model name for saving')
     parser.add_argument(
+        '--emulation_speed',
+        type=int,
+        default=0,
+        help='Emulation speed for PyBoy (0=no_limit, higher=faster)')
+    parser.add_argument(
         '--wandb_entity',
         type=str,
         default=os.environ.get(
@@ -435,12 +440,17 @@ def main():
             'WANDB_PROJECT',
             ''),
         help='Weights & Biases project')
+
     args = parser.parse_args()
 
     num_episodes = args.num_episodes
     model_name = args.model_name
     # Create environment
-    env = PokemonBlueEnv(args.rom_path, args.state_file)
+    env = PokemonBlueEnv(
+        args.rom_path,
+        args.state_file,
+        emulation_speed=args.emulation_speed
+    )
 
     # Initialize agent
     agent = DeepQLearningAgent(
@@ -462,6 +472,8 @@ def main():
             "replay_memory_size": agent.replay_memory_size,
             "architecture": "CNN",
             "epochs": num_episodes,
+            "emulation_speed": args.emulation_speed,
+            "state_file_name": args.state_file,
         },
     )
     # Training loop
@@ -492,7 +504,12 @@ def main():
             state = next_state
             cumulative_reward += reward
 
-        run.log({'reward': cumulative_reward, 'episode': episode})
+        run.log(
+            {
+                'cumulative_reward': cumulative_reward,
+                'average_loss': 0,
+                'average_q': 0,
+            })
         # Decay exploration rate
         if agent.epsilon > agent.epsilon_min:
             agent.epsilon *= agent.epsilon_decay
