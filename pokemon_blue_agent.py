@@ -504,9 +504,11 @@ def main():
                     done))
 
             if steps % 4 == 0:
-                loss, q = agent.train()
-                episode_q.append(q)
-                episode_losses.append(loss)
+                result = agent.train()
+                if result is not None:
+                    loss, q = result
+                    episode_q.append(q)
+                    episode_losses.append(loss)
 
             state = next_state
             cumulative_reward += reward
