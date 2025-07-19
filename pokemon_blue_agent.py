@@ -375,7 +375,7 @@ class DeepQLearningAgent:
             self.update_target_network()
 
         self._train_counter += 1
-        return loss_value, curr_q
+        return loss_value, curr_q.mean().item()
 
     def save(self, name):
         """
