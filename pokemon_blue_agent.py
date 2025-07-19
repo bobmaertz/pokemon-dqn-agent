@@ -326,7 +326,10 @@ class DeepQLearningAgent:
 
     def train(self):
         """
-        Train the agent using Deep Q-Learning
+        Train the agent using Deep Q-Learning;
+
+        returns:
+         - Loss for training
         """
         # Dont want to train on memory less than REPLAY_MEMORY_SIZE, not a big
         # enough batch.
@@ -361,7 +364,7 @@ class DeepQLearningAgent:
 
         # Compute loss
         loss = nn.MSELoss()(curr_q, target_q)
-
+        loss_value = loss.item()
         # Optimize the model
         self.optimizer.zero_grad()
         loss.backward()
@@ -372,6 +375,7 @@ class DeepQLearningAgent:
             self.update_target_network()
 
         self._train_counter += 1
+        return loss_value, curr_q
 
     def save(self, name):
         """
@@ -481,10 +485,12 @@ def main():
         state, _ = env.reset(options={"initial_run": True})
         done = False
         cumulative_reward = 0
+        episode_losses = []
+        episode_q = []
 
-        train_count = 0
+        steps = 0
         while not done:
-            train_count += 1
+            steps += 1
 
             action = agent.act(state)
             next_state, reward, done, _, _ = env.step(action)
@@ -497,9 +503,10 @@ def main():
                     next_state,
                     done))
 
-            if train_count % 4 == 0:
-                agent.train()
-                train_count = 0
+            if steps % 4 == 0:
+                loss, q = agent.train()
+                episode_q.append(q)
+                episode_losses.append(loss)
 
             state = next_state
             cumulative_reward += reward
@@ -507,8 +514,10 @@ def main():
         run.log(
             {
                 'cumulative_reward': cumulative_reward,
-                'average_loss': 0,
-                'average_q': 0,
+                'average_loss': sum(episode_losses) / len(episode_losses),
+                'average_q': sum(episode_q) / len(episode_q),
+                'num_steps': steps,
+                'epsilon': agent.epsilon,
             })
         # Decay exploration rate
         if agent.epsilon > agent.epsilon_min:
