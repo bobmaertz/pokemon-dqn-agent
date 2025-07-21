@@ -246,17 +246,23 @@ class DeepQLearningAgent:
             self,
             state_size,
             action_size,
-            replay_memory_size=REPLAY_MEMORY_SIZE):
+            replay_memory_size=REPLAY_MEMORY_SIZE,
+            minibatch_size=64,
+            epsilon_decay=0.99,
+            learning_rate=0.01,
+            epsilon_min=0.01,
+    ):
         self.state_size = state_size
         self.action_size = action_size
         self.replay_memory_size = replay_memory_size
         self.replay_memory = deque(maxlen=self.replay_memory_size)
         self.gamma = 0.95    # discount rate
         self.epsilon = 1.0   # exploration rate
-        self.epsilon_min = 0.01
-        self.epsilon_decay = 0.9995
-        self.learning_rate = 0.001
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
+        self.learning_rate = learning_rate
         self._train_counter = 0
+        self.minibatch_size = minibatch_size
 
         if torch.mps.is_available():
             self.device = torch.device("mps")
@@ -336,7 +342,7 @@ class DeepQLearningAgent:
         if len(self.replay_memory) < self.replay_memory_size:
             return
 
-        minibatch = random.sample(self.replay_memory, 64)
+        minibatch = random.sample(self.replay_memory, self.minibatch_size)
 
         # Reviewing algorithm from https://www.youtube.com/watch?v=qfovbG84EBg&t=335s
         # TODO: Double check normalization of 255
@@ -401,6 +407,11 @@ def main():
         default=REPLAY_MEMORY_SIZE,
         help='Replay memory size')
     parser.add_argument(
+        '--minibatch_size',
+        type=int,
+        default=64,
+        help='Minibatch size for training')
+    parser.add_argument(
         '--steps_per_episode',
         type=int,
         default=STEPS_PER_EPISODE,
@@ -410,6 +421,26 @@ def main():
         type=int,
         default=10,
         help='Number of episodes')
+    parser.add_argument(
+        '--num_steps_per_episode',
+        type=int,
+        default=10000,
+        help='Number of steps per episode')
+    parser.add_argument(
+        '--epsilon_decay',
+        type=float,
+        default=0.01,
+        help='Number of steps per episode')
+    parser.add_argument(
+        '--learning_rate',
+        type=float,
+        default=0.99,
+        help='Number of steps per episode')
+    parser.add_argument(
+        '--epsilon_min',
+        type=float,
+        default=0.01,
+        help='Number of steps per episode')
     parser.add_argument(
         '--rom_path',
         type=str,
@@ -453,14 +484,16 @@ def main():
     env = PokemonBlueEnv(
         args.rom_path,
         args.state_file,
-        emulation_speed=args.emulation_speed
+        emulation_speed=args.emulation_speed,
+        steps_per_episode=args.num_steps_per_episode,
     )
 
     # Initialize agent
     agent = DeepQLearningAgent(
         state_size=env.observation_space.shape,
         action_size=env.action_space.n,
-        replay_memory_size=args.replay_memory_size
+        replay_memory_size=args.replay_memory_size,
+        minibatch_size=args.minibatch_size
     )
 
     run = wandb.init(
@@ -472,7 +505,7 @@ def main():
             "epsilon": agent.epsilon,
             "epsilon_decay": agent.epsilon_decay,
             "gamma": agent.gamma,
-            "batch_num": 64,
+            "minibatch_size": agent.minibatch_size,
             "replay_memory_size": agent.replay_memory_size,
             "architecture": "CNN",
             "epochs": num_episodes,
