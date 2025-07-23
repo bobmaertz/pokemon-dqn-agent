@@ -17,7 +17,7 @@ import torch.optim as optim
 from gymnasium import spaces
 
 
-REPLAY_MEMORY_SIZE = 400
+REPLAY_MEMORY_SIZE = 1000
 STEPS_PER_EPISODE = 10000
 
 # Path to legally obtained Pokémon ROM
@@ -377,7 +377,7 @@ class DeepQLearningAgent:
         self.optimizer.step()
 
         # Update target network
-        if self._train_counter % 250 == 0:
+        if self._train_counter % 1000 == 0:
             self.update_target_network()
 
         self._train_counter += 1
@@ -429,12 +429,12 @@ def main():
     parser.add_argument(
         '--epsilon_decay',
         type=float,
-        default=0.01,
+        default=0.99,
         help='Number of steps per episode')
     parser.add_argument(
         '--learning_rate',
         type=float,
-        default=0.99,
+        default=0.001,
         help='Number of steps per episode')
     parser.add_argument(
         '--epsilon_min',
@@ -542,6 +542,10 @@ def main():
                     loss, q = result
                     episode_q.append(q)
                     episode_losses.append(loss)
+                    # Decay epsilon only when training occurs
+                    if agent.epsilon > agent.epsilon_min:
+                        agent.epsilon = max(
+                            agent.epsilon_min, agent.epsilon * agent.epsilon_decay)
 
             state = next_state
             cumulative_reward += reward
@@ -554,9 +558,6 @@ def main():
                 'num_steps': steps,
                 'epsilon': agent.epsilon,
             })
-        # Decay exploration rate
-        if agent.epsilon > agent.epsilon_min:
-            agent.epsilon *= agent.epsilon_decay
 
     agent.save(model_name)
 
