@@ -1,0 +1,24 @@
+.git/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# Local artifacts
+env_state/
+episode_logs/
+
+# ROM / emulator artifacts (should be bind-mounted instead)
+*.GBC
+*.gbc
+*.ram
+
+# Model checkpoints
+*.pth
+
+# OS/editor
+.DS_Store
+.vscode/
