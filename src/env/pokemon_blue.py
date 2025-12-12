@@ -153,7 +153,7 @@ class PokemonBlueEnv(gym.Env):
         """
 
         self.steps = self.steps + 1
-        if self.steps > self.steps_per_episode:
+        if self.steps >= self.steps_per_episode:
             return True
         # Check for game over conditions
         return False
