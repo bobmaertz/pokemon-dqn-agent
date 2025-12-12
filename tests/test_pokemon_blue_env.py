@@ -137,6 +137,27 @@ def test_step_ticks_and_terminates_after_steps_per_episode(pokemon_blue_module):
     assert env.pyboy.tick_calls.count((1, True, False)) == 2
 
 
+def test_step_info_includes_expected_keys_and_unique_tiles(pokemon_blue_module):
+    env = pokemon_blue_module.PokemonBlueEnv(rom_path="dummy.gbc", steps_per_episode=10)
+
+    # Fix location so we can reason about exploration reward.
+    env.pyboy.memory[0xD35E] = 7
+    env.pyboy.memory[0xD361] = 1
+    env.pyboy.memory[0xD362] = 2
+
+    _, r1, _, _, info1 = env.step(0)
+    assert r1 == 1.0
+    assert set(info1.keys()) >= {"map_num", "x", "y", "steps", "unique_tiles", "player_name", "player_name_raw"}
+    assert info1["map_num"] == 7
+    assert info1["x"] == 1
+    assert info1["y"] == 2
+    assert info1["unique_tiles"] == 1
+
+    _, r2, _, _, info2 = env.step(0)
+    assert r2 == 0
+    assert info2["unique_tiles"] == 1
+
+
 def test_reset_reinitializes_pyboy_and_clears_episode_state(pokemon_blue_module, tmp_path):
     state_file = tmp_path / "game_start.state"
     state_file.write_bytes(b"state")
@@ -169,3 +190,79 @@ def test_reset_reinitializes_pyboy_and_clears_episode_state(pokemon_blue_module,
 
     # Saved state loaded again
     assert env.pyboy.load_state_calls == 1
+
+
+def test_reset_without_state_file_does_not_load_state(pokemon_blue_module):
+    env = pokemon_blue_module.PokemonBlueEnv(
+        rom_path="dummy.gbc",
+        state_file=None,
+        steps_per_episode=10,
+    )
+
+    assert env.pyboy.load_state_calls == 0
+    env.reset()
+    assert env.pyboy.load_state_calls == 0
+
+
+def test_close_stops_emulator(pokemon_blue_module):
+    env = pokemon_blue_module.PokemonBlueEnv(rom_path="dummy.gbc")
+    pyboy_instance = env.pyboy
+    env.close()
+    assert pyboy_instance.stop_calls == [False]
+
+
+def test_close_is_idempotent_and_reset_still_works(pokemon_blue_module):
+    env = pokemon_blue_module.PokemonBlueEnv(rom_path="dummy.gbc")
+
+    # Should not raise if called twice
+    env.close()
+    env.close()
+
+    obs, info = env.reset()
+    assert obs.shape == (1, 144, 160)
+    assert info == {}
+
+
+def test_player_name_decoding_from_memory(pokemon_blue_module):
+    env = pokemon_blue_module.PokemonBlueEnv(rom_path="dummy.gbc")
+
+    # "ASH" using the minimal table in src.env.pokemon_blue.decode_gen1_text
+    name_bytes = [0x80, 0x92, 0x87, 0x50]  # A S H <END>
+    for i, b in enumerate(name_bytes):
+        env.pyboy.memory[pokemon_blue_module.PLAYER_NAME_ADDR + i] = b
+
+    info = env.get_game_state()
+    assert info["player_name"] == "ASH"
+
+
+def test_exploration_reward_only_once_per_unique_tile_and_resets(pokemon_blue_module):
+    env = pokemon_blue_module.PokemonBlueEnv(rom_path="dummy.gbc", steps_per_episode=100)
+
+    # Visit A, then A again, then B, then A, then B again.
+    a = (3, 10, 20)
+    b = (3, 11, 20)
+
+    def set_loc(loc):
+        m, x, y = loc
+        env.pyboy.memory[0xD35E] = m
+        env.pyboy.memory[0xD361] = x
+        env.pyboy.memory[0xD362] = y
+
+    set_loc(a)
+    _, r1, _, _, _ = env.step(0)
+    set_loc(a)
+    _, r2, _, _, _ = env.step(0)
+    set_loc(b)
+    _, r3, _, _, _ = env.step(0)
+    set_loc(a)
+    _, r4, _, _, _ = env.step(0)
+    set_loc(b)
+    _, r5, _, _, _ = env.step(0)
+
+    assert [r1, r2, r3, r4, r5] == [1.0, 0, 1.0, 0, 0]
+
+    # After reset, the same tile should reward again.
+    env.reset()
+    set_loc(a)
+    _, r6, _, _, _ = env.step(0)
+    assert r6 == 1.0

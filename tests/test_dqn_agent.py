@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 from unittest.mock import patch
 from collections import deque
+import pytest
 
 import sys
 import os
@@ -74,53 +75,23 @@ class TestDeepQLearningAgent:
                 agent = DeepQLearningAgent(state_size=(144, 160), action_size=4)
                 assert agent.device == torch.device("cpu")
 
-    def test_build_model_architecture(self, force_cpu_device):
-        """Test neural network architecture is built correctly"""
+    def test_build_model_behavior(self, force_cpu_device, mock_state):
+        """Test model accepts expected observations and outputs action values"""
         agent = DeepQLearningAgent(state_size=(144, 160), action_size=4)
-        model = agent._build_model()
-        
-        # Test model structure - should have 10 layers total
-        layers = list(model.children())
-        assert len(layers) == 10
-        
-        # Conv2d layer 1
-        assert isinstance(layers[0], nn.Conv2d)
-        assert layers[0].in_channels == 1
-        assert layers[0].out_channels == 32
-        assert layers[0].kernel_size == (3, 3)
-        
-        # ReLU activation 1
-        assert isinstance(layers[1], nn.ReLU) 
-        
-        # MaxPool2d layer 1
-        assert isinstance(layers[2], nn.MaxPool2d)
-        assert layers[2].kernel_size == 2
-        
-        # Conv2d layer 2
-        assert isinstance(layers[3], nn.Conv2d)
-        assert layers[3].in_channels == 32
-        assert layers[3].out_channels == 64
-        
-        # ReLU activation 2
-        assert isinstance(layers[4], nn.ReLU)
-        
-        # MaxPool2d layer 2
-        assert isinstance(layers[5], nn.MaxPool2d)
-        
-        # Flatten layer
-        assert isinstance(layers[6], nn.Flatten)
-        
-        # First Linear layer (256 hidden units)
-        assert isinstance(layers[7], nn.Linear)
-        assert layers[7].out_features == 256
-        
-        # ReLU activation 3
-        assert isinstance(layers[8], nn.ReLU)
-        
-        # Output Linear layer
-        assert isinstance(layers[9], nn.Linear)
-        assert layers[9].in_features == 256
-        assert layers[9].out_features == 4
+
+        # Policy/target should agree immediately after init
+        state_batch = torch.FloatTensor(mock_state).unsqueeze(0).unsqueeze(0)
+        policy_out = agent.policy_model(state_batch)
+        target_out = agent.target_model(state_batch)
+
+        assert isinstance(policy_out, torch.Tensor)
+        assert policy_out.shape == (1, 4)
+        assert torch.allclose(policy_out, target_out)
+
+        # Different action_size should change output width
+        agent2 = DeepQLearningAgent(state_size=(144, 160), action_size=6)
+        out2 = agent2.policy_model(state_batch)
+        assert out2.shape == (1, 6)
 
     def test_model_forward_pass(self, force_cpu_device, mock_state):
         """Test model can perform forward pass with correct input/output shapes"""
@@ -132,6 +103,39 @@ class TestDeepQLearningAgent:
         
         assert output.shape == (1, 4)  # batch_size=1, action_size=4
         assert isinstance(output, torch.Tensor)
+
+    def test_state_to_tensor_accepts_hw_uint8_and_normalizes(self, force_cpu_device):
+        agent = DeepQLearningAgent(state_size=(144, 160), action_size=4)
+        state = np.full((144, 160), 255, dtype=np.uint8)
+
+        t = agent._state_to_tensor(state, add_batch_dim=True)
+        assert isinstance(t, torch.Tensor)
+        assert tuple(t.shape) == (1, 1, 144, 160)
+        assert float(t.max()) == 1.0
+        assert float(t.min()) == 1.0
+
+    def test_state_to_tensor_accepts_chw_and_preserves_shape(self, force_cpu_device):
+        agent = DeepQLearningAgent(state_size=(144, 160), action_size=4)
+        state = np.zeros((1, 144, 160), dtype=np.uint8)
+
+        t = agent._state_to_tensor(state, add_batch_dim=True)
+        assert tuple(t.shape) == (1, 1, 144, 160)
+
+    def test_state_to_tensor_rejects_invalid_dims(self, force_cpu_device):
+        agent = DeepQLearningAgent(state_size=(144, 160), action_size=4)
+        bad_state = np.zeros((2, 1, 144, 160), dtype=np.uint8)
+
+        with pytest.raises(ValueError):
+            agent._state_to_tensor(bad_state, add_batch_dim=True)
+
+    def test_act_accepts_channel_first_state(self, force_cpu_device):
+        agent = DeepQLearningAgent(state_size=(144, 160), action_size=4)
+        agent.epsilon = 0.0
+        state = np.random.randint(0, 255, (1, 144, 160), dtype=np.uint8)
+
+        action = agent.act(state)
+        assert isinstance(action, int)
+        assert 0 <= action < 4
 
     def test_act_exploration(self, force_cpu_device, mock_state):
         """Test action selection during exploration (high epsilon)"""
@@ -285,26 +289,67 @@ class TestDeepQLearningAgent:
                         pass  # Ignore gradient computation errors in test
                     mock_update.assert_called_once()
 
-    def test_train_optimizer_step(self, force_cpu_device, mock_transitions):
-        """Test that optimizer step is called during training"""
-        agent = DeepQLearningAgent(state_size=(144, 160), action_size=4, replay_memory_size=100)
-        
-        # Fill memory
-        for transition in mock_transitions:
-            agent.update_memory(transition)
-        
-        # Mock optimizer methods
-        with patch.object(agent.optimizer, 'zero_grad') as mock_zero_grad:
-            with patch.object(agent.optimizer, 'step') as mock_step:
-                try:
-                    agent.train()
-                    mock_zero_grad.assert_called_once()
-                    mock_step.assert_called_once()
-                except RuntimeError:
-                    # Even if gradient computation fails, optimizer methods should be called
-                    mock_zero_grad.assert_called_once()
-                    # step might not be called if backward() fails, so we check more flexibly
-                    assert mock_zero_grad.called
+    def test_train_does_not_crash_when_minibatch_exceeds_memory(self, force_cpu_device):
+        """Training should no-op safely for misconfigured minibatch size."""
+        agent = DeepQLearningAgent(state_size=(144, 160), action_size=4, replay_memory_size=10, minibatch_size=32)
+
+        # Add enough transitions to satisfy replay_memory_size but not minibatch_size.
+        for _ in range(10):
+            s = np.random.randint(0, 255, (144, 160), dtype=np.uint8)
+            t = Transition(s, 0, 0.0, s, False)
+            agent.update_memory(t)
+
+        # Should return None (no training) rather than raising from random.sample.
+        assert agent.train() is None
+
+    def test_train_target_q_math_and_done_masking(self, force_cpu_device, monkeypatch):
+        """Validate the Bellman target computation (reward + gamma * max_next_q * (1-done))."""
+        import torch.optim as optim
+
+        class ConstantQNet(nn.Module):
+            def __init__(self, q_values: list[float]):
+                super().__init__()
+                self.q = nn.Parameter(torch.tensor(q_values, dtype=torch.float32))
+
+            def forward(self, x):
+                batch = x.shape[0]
+                return self.q.unsqueeze(0).expand(batch, -1)
+
+        agent = DeepQLearningAgent(
+            state_size=(144, 160),
+            action_size=4,
+            replay_memory_size=2,
+            minibatch_size=2,
+        )
+
+        # Swap in deterministic networks and a no-op optimizer.
+        agent.policy_model = ConstantQNet([0.0, 0.0, 0.0, 0.0]).to(agent.device)
+        agent.target_model = ConstantQNet([1.0, 5.0, 2.0, 0.0]).to(agent.device)
+        agent.optimizer = optim.SGD(agent.policy_model.parameters(), lr=0.0)
+
+        state = np.zeros((144, 160), dtype=np.uint8)
+        next_state = np.zeros((144, 160), dtype=np.uint8)
+
+        # Two transitions: one non-terminal, one terminal.
+        t1 = Transition(state, 1, 1.0, next_state, False)
+        t2 = Transition(state, 2, -1.0, next_state, True)
+        agent.update_memory(t1)
+        agent.update_memory(t2)
+
+        # Make sampling deterministic.
+        monkeypatch.setattr('random.sample', lambda seq, k: [t1, t2])
+
+        loss, mean_q = agent.train()
+
+        # Expected targets:
+        # max_next_q = 5.0
+        # target1 = 1.0 + 0.95 * 5.0 = 5.75
+        # target2 = -1.0 (done=True masks bootstrap)
+        # curr_q gathered from policy are 0.0, 0.0
+        expected_loss = ((5.75 ** 2) + ((-1.0) ** 2)) / 2.0
+
+        assert mean_q == pytest.approx(0.0, abs=1e-7)
+        assert loss == pytest.approx(expected_loss, rel=1e-6, abs=1e-6)
 
     def test_train_loss_computation(self, force_cpu_device):
         """Test that training method runs and handles loss computation"""
@@ -384,25 +429,18 @@ class TestDeepQLearningAgent:
         assert agent.epsilon >= agent.epsilon_min
 
     def test_batch_processing_shapes(self, force_cpu_device, mock_transitions):
-        """Test that batch processing handles correct tensor shapes"""
+        """Test that batch processing accepts correct shapes"""
         agent = DeepQLearningAgent(state_size=(144, 160), action_size=4, replay_memory_size=100, minibatch_size=8)
         
         # Fill memory
         for transition in mock_transitions[:100]:
             agent.update_memory(transition)
         
-        # Test that the batch processing logic works correctly
-        # We'll mock the problematic parts but test the tensor creation
         sample_transitions = mock_transitions[:8]
-        with patch('random.sample', return_value=sample_transitions):
-            # Test tensor creation without the full training pipeline
-            current_states = torch.FloatTensor(
-                np.array([transition.state for transition in sample_transitions]) / 255
-            ).to(agent.device)
-            
-            # Verify correct shape for batch processing
-            assert current_states.shape == (8, 144, 160)
-            
-            # Test that we can add channel dimension correctly
-            current_states = current_states.unsqueeze(1)  # Add channel dimension
-            assert current_states.shape == (8, 1, 144, 160)  # batch, channel, height, width
+        batch = np.asarray([t.state for t in sample_transitions], dtype=np.uint8)
+        assert batch.shape == (8, 144, 160)
+
+        # Convert each into tensors using the agent's own state path
+        tensors = [agent._state_to_tensor(s, add_batch_dim=False) for s in batch]
+        stacked = torch.stack(tensors, dim=0)
+        assert tuple(stacked.shape) == (8, 1, 144, 160)

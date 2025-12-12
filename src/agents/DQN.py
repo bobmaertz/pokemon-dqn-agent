@@ -140,9 +140,10 @@ class DeepQLearningAgent:
         returns:
          - Loss for training
         """
-        # Dont want to train on memory less than REPLAY_MEMORY_SIZE, not a big
-        # enough batch.
-        if len(self.replay_memory) < self.replay_memory_size:
+        # Don't train until we have enough transitions to both (a) meet the
+        # configured warmup threshold and (b) sample a full minibatch.
+        min_required = max(self.replay_memory_size, self.minibatch_size)
+        if len(self.replay_memory) < min_required:
             return
 
         minibatch = random.sample(self.replay_memory, self.minibatch_size)
