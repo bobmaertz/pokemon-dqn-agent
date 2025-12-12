@@ -12,5 +12,5 @@ env_state/
 **/*.GBC
 **/*.GBC.ram
 **/*.pth
-
+**/*.log
 *.state

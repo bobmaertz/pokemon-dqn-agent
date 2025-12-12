@@ -1,0 +1,2 @@
+# Dependencies for analysis/visualization scripts (e.g. analysis.py)
+matplotlib>=3.8.0

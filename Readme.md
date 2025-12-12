@@ -35,24 +35,34 @@ To make lint + tests required for each commit to your default branch, enable a b
 - A legally obtained Pokémon Blue/Red ROM file
 
 ## Installation
-1. Clone Repo 
+1. Clone repo
 2. Install dependencies:
+
 ```sh
-pip install torch numpy gymnasium pyboy
-``
+python3 -m pip install -r requirements.txt
+```
 
-3. Place your legally obtained Pokémon ROM file in the project directory as `POKEMONR.GBC`.
+3. (Optional) Install dependencies for visualization/analysis (`analysis.py`):
 
-4. (Optional) Create a saved state file using PyBoy and save it as `state_file.state`.
+```sh
+python3 -m pip install -r requirements-analysis.txt
+```
+
+4. Place your legally obtained Pokémon ROM file in the project directory as `POKEMONR.GBC`.
+
+5. (Optional) Create a saved state file using PyBoy and save it under `env_state/`.
 
 ## Usage
-
-Run the training script:
+Run the runner:
 
 ```sh
+python3 pokemon_blue_agent.py --rom_path ./POKEMONR.GBC --state_file ./env_state/game_start.state --steps 500
+```
 
-python pokemon-emulator-project.py
+Write per-episode step logs (for parsing with `analysis.py`):
 
+```sh
+python3 pokemon_blue_agent.py --rom_path ./POKEMONR.GBC --state_file ./env_state/game_start.state --steps 5000 --episode_log_dir ./episode_logs
 ```
 
 ## How It Works
