@@ -4,6 +4,10 @@ import numpy as np
 from gymnasium import spaces
 import pyboy
 
+
+PLAYER_NAME_ADDR = 0xD158
+PLAYER_NAME_LEN = 11
+
 ACTION_MAP = {
     0: 'up',
     1: 'down',
@@ -153,7 +157,7 @@ class PokemonBlueEnv(gym.Env):
         """
 
         self.steps = self.steps + 1
-        if self.steps >= self.steps_per_episode:
+        if self.steps > self.steps_per_episode:
             return True
         # Check for game over conditions
         return False
@@ -166,8 +170,55 @@ class PokemonBlueEnv(gym.Env):
             dict: Game state metrics
         """
 
-        # Extract memory values, player position, etc.
-        return {}
+        def read_u8(addr: int) -> int:
+            try:
+                return int(self.pyboy.memory[addr])
+            except KeyError:
+                return 0
+
+        def read_u8s(addr: int, length: int) -> list[int]:
+            return [read_u8(addr + i) for i in range(length)]
+
+        def decode_gen1_text(data: list[int]) -> str:
+            # Minimal Gen 1-ish decoder: enough to read common uppercase names.
+            out: list[str] = []
+            for b in data:
+                if b == 0x50:  # string terminator
+                    break
+                if b == 0x7F:  # space
+                    out.append(' ')
+                    continue
+                if 0x80 <= b <= 0x99:
+                    out.append(chr(ord('A') + (b - 0x80)))
+                    continue
+                if 0xA0 <= b <= 0xB9:
+                    out.append(chr(ord('a') + (b - 0xA0)))
+                    continue
+                if 0xF6 <= b <= 0xFF:  # 0-9 in many Gen 1 tables
+                    out.append(chr(ord('0') + (b - 0xF6)))
+                    continue
+                out.append('?')
+            return ''.join(out).strip()
+
+        map_num = read_u8(0xD35E)
+        x_coord = read_u8(0xD361)
+        y_coord = read_u8(0xD362)
+
+        player_name_raw = read_u8s(PLAYER_NAME_ADDR, PLAYER_NAME_LEN)
+        player_name = decode_gen1_text(player_name_raw)
+
+        return {
+            "map_num": map_num,
+            "x": x_coord,
+            "y": y_coord,
+            "steps": self.steps,
+            "unique_tiles": len(self.explore_map),
+            "player_name": player_name,
+            "player_name_raw": player_name_raw,
+        }
+
+    def get_game_state(self) -> dict:
+        return self._get_game_state()
 
     def reset(self, *, seed=None, options=None):
         """
