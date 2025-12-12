@@ -3,7 +3,29 @@ import datetime as _dt
 import os
 from pathlib import Path
 
-import numpy as np
+import sys
+
+try:
+    import numpy as np
+except ModuleNotFoundError as exc:
+    missing = getattr(exc, "name", "a required dependency")
+    venv = os.environ.get("VIRTUAL_ENV")
+    hint = (
+        "Activate the repo virtualenv and install dependencies:\n"
+        "  source .venv/bin/activate\n"
+        "  python -m pip install -r requirements.txt\n"
+    )
+    if venv:
+        hint = (
+            f"You're running inside VIRTUAL_ENV={venv}, but '{missing}' is missing.\n" + hint
+        )
+    else:
+        hint = (
+            f"It looks like you're running outside the repo virtualenv and '{missing}' isn't installed.\n"
+            + hint
+        )
+    print(hint, file=sys.stderr)
+    raise
 
 from src.agents.DQN import DeepQLearningAgent, Transition
 from src.env.pokemon_blue import PokemonBlueEnv

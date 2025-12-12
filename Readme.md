@@ -39,13 +39,15 @@ To make lint + tests required for each commit to your default branch, enable a b
 2. Install dependencies:
 
 ```sh
-python3 -m pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
 3. (Optional) Install dependencies for visualization/analysis (`analysis.py`):
 
 ```sh
-python3 -m pip install -r requirements-analysis.txt
+python -m pip install -r requirements-analysis.txt
 ```
 
 4. Place your legally obtained Pokémon ROM file in the project directory as `POKEMONR.GBC`.
@@ -56,13 +58,13 @@ python3 -m pip install -r requirements-analysis.txt
 Run the runner:
 
 ```sh
-python3 pokemon_blue_agent.py --rom_path ./POKEMONR.GBC --state_file ./env_state/game_start.state --steps 500
+python pokemon_blue_agent.py --rom_path ./POKEMONR.GBC --state_file ./env_state/game_start.state --steps 500
 ```
 
 Write per-episode step logs (for parsing with `analysis.py`):
 
 ```sh
-python3 pokemon_blue_agent.py --rom_path ./POKEMONR.GBC --state_file ./env_state/game_start.state --steps 5000 --episode_log_dir ./episode_logs
+python pokemon_blue_agent.py --rom_path ./POKEMONR.GBC --state_file ./env_state/game_start.state --steps 5000 --episode_log_dir ./episode_logs
 ```
 
 ## How It Works
