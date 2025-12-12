@@ -1,4 +1,4 @@
-.PHONY: venv lint requirements
+.PHONY: venv lint test requirements
 
 venv:
 	. venv/bin/activate 
@@ -7,8 +7,11 @@ update: venv
 	pip install --upgrade pip
 	pip freeze > requirements.txt
     
-lint: venv
-	autopep8 -i --aggressive *.py
+lint:
+	python -m ruff check .
+
+test:
+	pytest -q --cov=src --cov-report=term-missing
 
 build: 
 	docker build . -t pokemon_blue:latest 

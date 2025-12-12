@@ -1,0 +1,2 @@
+# Development-only dependencies
+ruff>=0.8.0

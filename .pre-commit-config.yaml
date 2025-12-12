@@ -1,5 +1,10 @@
 # .pre-commit-config.yaml
 repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.2
+    hooks:
+      - id: ruff
+        args: ["check", "."]
   - repo: https://github.com/hhatto/autopep8
     rev: v2.3.2 
     hooks:

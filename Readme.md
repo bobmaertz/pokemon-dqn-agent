@@ -16,6 +16,15 @@ Inspired by [Peter Whidden's Youtube Video](https://www.youtube.com/watch?v=DcYL
 - Automated training pipeline
 - Model checkpointing
 
+## CI
+
+GitHub Actions runs on every push and pull request:
+
+- `ci / lint` (ruff)
+- `ci / test` (pytest)
+
+To make lint + tests required for each commit to your default branch, enable a branch protection rule in GitHub and require these status checks.
+
 ## Prerequisites
 
 - Python 3.8+

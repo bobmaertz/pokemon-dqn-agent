@@ -1,6 +1,11 @@
 venv 
 screenshots
 wandb
+.venv
+.vscode
+__pycache__/
+.pytest_cache/
+.ruff_cache__/
 
 **/*.GBC
 **/*.GBC.ram

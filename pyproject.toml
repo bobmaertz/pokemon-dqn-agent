@@ -1,0 +1,12 @@
+[tool.ruff]
+# Keep linting minimal/low-noise: catch real errors without reformatting the repo.
+exclude = [
+  ".venv",
+  "venv",
+  "__pycache__",
+  "env_state",
+]
+
+[tool.ruff.lint]
+# Pyflakes + "hard" syntax-ish errors.
+select = ["F", "E9"]

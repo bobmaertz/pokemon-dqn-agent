@@ -5,3 +5,6 @@ pyboy==2.5.1
 torch==2.6.0
 wandb==0.21.0
 pillow==11.3.0
+pytest>=7.0.0
+pytest-mock>=3.10.0
+pytest-cov>=4.0.0
