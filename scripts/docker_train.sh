@@ -225,7 +225,7 @@ if [[ -n "$episode_logs_dir" ]]; then
 fi
 
 set -x
-exec docker run --rm -it \
+exec docker run --rm -it --init \
   "${docker_cpu_args[@]}" \
   "${docker_gpu_args[@]}" \
   "${docker_env[@]}" \
