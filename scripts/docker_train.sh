@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/docker_train.sh [--build] [--tag IMAGE_TAG] [--gpus auto|all|none] \
+  scripts/docker_train.sh [--build] [--tag IMAGE_TAG] [--gpus auto|all|none] [--cpus N] \
     --rom /path/to/POKEMONR.GBC [--state /path/to/file.state] \
     [--episodes N] [--steps-per-episode N] [--emulation-speed N] \
     [--episode-log-dir DIR] [--wandb-entity X] [--wandb-project Y] [-- EXTRA_ARGS...]
@@ -41,6 +41,7 @@ PY
 want_build=0
 image_tag="pokemon_blue:latest"
 gpus="auto"
+cpus=""
 rom_host=""
 state_host=""
 episodes=""
@@ -68,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --gpus)
       gpus="$2"
+      shift 2
+      ;;
+    --cpus)
+      cpus="$2"
       shift 2
       ;;
     --rom)
@@ -167,6 +172,11 @@ case "$gpus" in
     ;;
 esac
 
+docker_cpu_args=()
+if [[ -n "$cpus" ]]; then
+  docker_cpu_args+=("--cpus" "$cpus")
+fi
+
 if [[ "$want_build" -eq 1 ]]; then
   (cd "$root" && docker build -t "$image_tag" .)
 fi
@@ -216,6 +226,7 @@ fi
 
 set -x
 exec docker run --rm -it \
+  "${docker_cpu_args[@]}" \
   "${docker_gpu_args[@]}" \
   "${docker_env[@]}" \
   "${mounts[@]}" \
