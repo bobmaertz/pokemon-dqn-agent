@@ -42,7 +42,7 @@ class PokemonBlueEnv(gym.Env):
         self._current_state = None
         self.screen_memory = []
         self.steps = 0
-        self.explore_map = {}
+        self.explore_map = set()
 
         # Initialize PyBoy emulator
         self.pyboy = pyboy.PyBoy(
@@ -165,13 +165,13 @@ class PokemonBlueEnv(gym.Env):
         map_num = self.pyboy.memory[0xD35E]
         x_coord = self.pyboy.memory[0xD361]
         y_coord = self.pyboy.memory[0xD362]
-        loc = f"{map_num}:{x_coord}:{y_coord}"
+        loc = (int(map_num), int(x_coord), int(y_coord))
 
         if loc in self.explore_map:
             return 0
-        else:
-            self.explore_map[loc] = True
-            return 1.0
+
+        self.explore_map.add(loc)
+        return 1.0
         return 0
 
     def _is_episode_done(self):
@@ -257,7 +257,7 @@ class PokemonBlueEnv(gym.Env):
 
         self.screen_memory = []
         self.steps = 0
-        self.explore_map = {}
+        self.explore_map = set()
 
         # Perform a complete stop
         self.pyboy.stop(save=False)

@@ -190,7 +190,7 @@ def test_reset_reinitializes_pyboy_and_clears_episode_state(pokemon_blue_module,
 
     # Episode state reset
     assert env.steps == 0
-    assert env.explore_map == {}
+    assert env.explore_map == set()
 
     # Saved state loaded again
     assert env.pyboy.load_state_calls == 1
