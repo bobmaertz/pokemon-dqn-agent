@@ -8,8 +8,9 @@ import random
 from collections import namedtuple
 
 from torchrl.data import ReplayBuffer
-from torchrl.data.replay_buffers.samplers import RandomSampler
-from torchrl.data.replay_buffers.storages import ListStorage
+from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
+from torchrl.data.replay_buffers.storages import LazyTensorStorage
+from tensordict import TensorDict
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'reward', 'next_state', 'done'))
@@ -37,13 +38,10 @@ class DeepQLearningAgent:
         self.state_size = state_size
         self.action_size = action_size
         self.replay_memory_size = replay_memory_size
-        # TorchRL replay buffer with a Python-object storage.
-        # We use an identity collate_fn so sampling returns a plain list of
-        # Transition-like objects (rather than attempting to stack).
+        # TorchRL replay buffer storing TensorDict transitions.
         self.replay_memory = ReplayBuffer(
-            storage=ListStorage(max_size=self.replay_memory_size),
-            sampler=RandomSampler(),
-            collate_fn=lambda x: x,
+            storage=LazyTensorStorage(max_size=self.replay_memory_size),
+            sampler=SamplerWithoutReplacement(),
         )
         self.gamma = float(gamma)    # discount rate
         self.epsilon = float(epsilon_start)   # exploration rate
@@ -147,9 +145,39 @@ class DeepQLearningAgent:
         Update the replay memory with the latest transition tuple
         - state, action, reward, next_state, done
         """
-        self.replay_memory.add(transition)
+        self.replay_memory.add(self._transition_to_tensordict(transition))
 
-    def _sample_minibatch(self):
+    def _transition_to_tensordict(self, transition) -> TensorDict:
+        if isinstance(transition, TensorDict):
+            return transition
+
+        def as_uint8_chw(x):
+            if isinstance(x, torch.Tensor):
+                t = x.detach().cpu()
+            else:
+                t = torch.from_numpy(np.asarray(x))
+
+            if t.ndim == 2:
+                t = t.unsqueeze(0)
+
+            if t.ndim != 3:
+                raise ValueError(f"Expected state with 2 or 3 dims, got shape {tuple(t.shape)}")
+
+            return t.to(dtype=torch.uint8, copy=False).contiguous()
+
+        td = TensorDict(
+            {
+                "state": as_uint8_chw(transition.state),
+                "action": torch.tensor(int(transition.action), dtype=torch.int64),
+                "reward": torch.tensor(float(transition.reward), dtype=torch.float32),
+                "next_state": as_uint8_chw(transition.next_state),
+                "done": torch.tensor(bool(transition.done), dtype=torch.bool),
+            },
+            batch_size=[],
+        )
+        return td
+
+    def _sample_minibatch(self) -> TensorDict:
         return self.replay_memory.sample(self.minibatch_size)
 
     def update_target_network(self):
@@ -171,29 +199,14 @@ class DeepQLearningAgent:
         if len(self.replay_memory) < int(min_required):
             return
 
-        minibatch = self._sample_minibatch()
+        batch = self._sample_minibatch()
 
-        # Reviewing algorithm from https://www.youtube.com/watch?v=qfovbG84EBg&t=335s
-        # TODO: Double check normalization of 255
-        current_states_np = np.asarray([transition.state for transition in minibatch], dtype=np.float32)
-        if current_states_np.ndim == 3:
-            current_states_np = current_states_np[:, None, :, :]  # (B, 1, H, W)
-        current_states_np /= 255.0
-        current_states = torch.from_numpy(current_states_np).to(self.device)
-
-        actions_np = np.fromiter((t.action for t in minibatch), dtype=np.int64, count=self.minibatch_size)
-        rewards_np = np.fromiter((t.reward for t in minibatch), dtype=np.float32, count=self.minibatch_size)
-        dones_np = np.fromiter((t.done for t in minibatch), dtype=np.float32, count=self.minibatch_size)
-
-        actions = torch.from_numpy(actions_np).to(self.device)
-        rewards = torch.from_numpy(rewards_np).to(self.device)
-        dones = torch.from_numpy(dones_np).to(self.device)
-
-        next_states_np = np.asarray([transition.next_state for transition in minibatch], dtype=np.float32)
-        if next_states_np.ndim == 3:
-            next_states_np = next_states_np[:, None, :, :]  # (B, 1, H, W)
-        next_states_np /= 255.0
-        next_states = torch.from_numpy(next_states_np).to(self.device)
+        # Normalization assumes uint8 frames in [0, 255].
+        current_states = batch["state"].to(device=self.device, dtype=torch.float32).div_(255.0)
+        next_states = batch["next_state"].to(device=self.device, dtype=torch.float32).div_(255.0)
+        actions = batch["action"].to(device=self.device)
+        rewards = batch["reward"].to(device=self.device)
+        dones = batch["done"].to(device=self.device, dtype=torch.float32)
 
         # Compute Q-values for current states
         curr_q = self.policy_model(current_states)

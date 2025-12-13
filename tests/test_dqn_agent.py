@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from torchrl.data import ReplayBuffer
+from tensordict import TensorDict
 
 import sys
 import os
@@ -196,21 +197,34 @@ class TestDeepQLearningAgent:
         agent.update_memory(mock_transition)
         
         assert len(agent.replay_memory) == initial_length + 1
-        assert agent.replay_memory.sample(1)[0] == mock_transition
+        batch = agent.replay_memory.sample(1)
+        assert isinstance(batch, TensorDict)
+        assert batch.batch_size == torch.Size([1])
+        assert int(batch["action"].item()) == int(mock_transition.action)
+        assert float(batch["reward"].item()) == float(mock_transition.reward)
+        assert bool(batch["done"].item()) == bool(mock_transition.done)
+
+        expected_state = torch.from_numpy(np.asarray(mock_transition.state))
+        if expected_state.ndim == 2:
+            expected_state = expected_state.unsqueeze(0)
+        expected_state = expected_state.to(torch.uint8)
+        assert torch.equal(batch["state"][0], expected_state)
 
     def test_update_memory_capacity_limit(self, force_cpu_device, mock_transitions):
         """Test replay memory respects capacity limit"""
         agent = DeepQLearningAgent(state_size=(144, 160), action_size=4, replay_memory_size=50)
         
-        # Fill memory beyond capacity
-        for transition in mock_transitions:
-            agent.update_memory(transition)
+        # Fill memory beyond capacity with deterministic actions.
+        state = np.zeros((144, 160), dtype=np.uint8)
+        for i in range(100):
+            t = Transition(state, i, 0.0, state, False)
+            agent.update_memory(t)
         
         assert len(agent.replay_memory) == 50
-        # Buffer should not grow beyond capacity.
-        stored = list(agent.replay_memory.storage._storage)
-        assert not any(t is mock_transitions[0] for t in stored)
-        assert any(t is mock_transitions[-1] for t in stored)
+        # Buffer should contain the last 50 actions: [50..99].
+        batch = agent.replay_memory.sample(50)
+        actions = sorted(batch["action"].tolist())
+        assert actions == list(range(50, 100))
 
     def test_update_target_network(self, force_cpu_device):
         """Test target network weight synchronization"""
@@ -337,7 +351,7 @@ class TestDeepQLearningAgent:
             t = Transition(s, 0, 0.0, s, False)
             agent.update_memory(t)
 
-        # Should return None (no training) rather than raising from random.sample.
+        # Should return None (no training) rather than raising from sampling.
         assert agent.train() is None
 
     def test_train_target_q_math_and_done_masking(self, force_cpu_device, monkeypatch):
@@ -375,7 +389,23 @@ class TestDeepQLearningAgent:
         agent.update_memory(t2)
 
         # Make sampling deterministic.
-        monkeypatch.setattr(agent, '_sample_minibatch', lambda: [t1, t2])
+        td = TensorDict(
+            {
+                "state": torch.stack([
+                    torch.from_numpy(state).to(torch.uint8).unsqueeze(0),
+                    torch.from_numpy(state).to(torch.uint8).unsqueeze(0),
+                ], dim=0),
+                "action": torch.tensor([1, 2], dtype=torch.int64),
+                "reward": torch.tensor([1.0, -1.0], dtype=torch.float32),
+                "next_state": torch.stack([
+                    torch.from_numpy(next_state).to(torch.uint8).unsqueeze(0),
+                    torch.from_numpy(next_state).to(torch.uint8).unsqueeze(0),
+                ], dim=0),
+                "done": torch.tensor([False, True], dtype=torch.bool),
+            },
+            batch_size=[2],
+        )
+        monkeypatch.setattr(agent, '_sample_minibatch', lambda: td)
 
         loss, mean_q = agent.train()
 
