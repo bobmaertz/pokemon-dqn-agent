@@ -21,22 +21,33 @@ class DeepQLearningAgent:
             state_size,
             action_size,
             replay_memory_size=500,
+            replay_warmup=None,
             minibatch_size=64,
             epsilon_decay=0.99,
             learning_rate=0.01,
             epsilon_min=0.01,
+            epsilon_start=1.0,
+            gamma=0.95,
+            target_update_every=250,
     ):
         self.state_size = state_size
         self.action_size = action_size
         self.replay_memory_size = replay_memory_size
         self.replay_memory = deque(maxlen=self.replay_memory_size)
-        self.gamma = 0.95    # discount rate
-        self.epsilon = 1.0   # exploration rate
+        self.gamma = float(gamma)    # discount rate
+        self.epsilon = float(epsilon_start)   # exploration rate
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
         self.learning_rate = learning_rate
         self._train_counter = 0
         self.minibatch_size = minibatch_size
+
+        if replay_warmup is None:
+            # Default warmup is small enough to start learning early, but still
+            # allow a bit of experience collection. Also capped by replay size.
+            replay_warmup = min(int(self.replay_memory_size), 1000)
+        self.replay_warmup = int(replay_warmup)
+        self.target_update_every = int(target_update_every)
 
         self.device = self._select_device()
 
@@ -140,10 +151,10 @@ class DeepQLearningAgent:
         returns:
          - Loss for training
         """
-        # Don't train until we have enough transitions to both (a) meet the
-        # configured warmup threshold and (b) sample a full minibatch.
-        min_required = max(self.replay_memory_size, self.minibatch_size)
-        if len(self.replay_memory) < min_required:
+        # Don't train until we have enough transitions to (a) meet the warmup
+        # threshold and (b) sample a full minibatch.
+        min_required = max(self.replay_warmup, self.minibatch_size)
+        if len(self.replay_memory) < int(min_required):
             return
 
         minibatch = random.sample(self.replay_memory, self.minibatch_size)
@@ -186,8 +197,8 @@ class DeepQLearningAgent:
 
         self._train_counter += 1
 
-        # Update target network every 250 training steps (250, 500, ...)
-        if self._train_counter % 250 == 0:
+        # Update target network every N training steps (N, 2N, ...)
+        if self.target_update_every > 0 and (self._train_counter % self.target_update_every == 0):
             self.update_target_network()
         return loss_value, curr_q.mean().item()
 

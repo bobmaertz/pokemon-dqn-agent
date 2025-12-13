@@ -80,16 +80,43 @@ def parse_args() -> argparse.Namespace:
         help="Train the DQN every N environment steps",
     )
     parser.add_argument(
+        "--gamma",
+        type=float,
+        default=0.95,
+        help="Discount factor (agent gamma)",
+    )
+    parser.add_argument(
+        "--epsilon_start",
+        type=float,
+        default=1.0,
+        help="Initial epsilon for epsilon-greedy exploration",
+    )
+    parser.add_argument(
         "--replay_memory_size",
         type=int,
         default=500,
         help="Replay memory size",
     )
     parser.add_argument(
+        "--replay_warmup",
+        type=int,
+        default=None,
+        help=(
+            "Transitions required before training starts. Defaults to min(replay_memory_size, 1000). "
+            "Use this to avoid delaying training when replay_memory_size is large."
+        ),
+    )
+    parser.add_argument(
         "--minibatch_size",
         type=int,
         default=64,
         help="Minibatch size for training",
+    )
+    parser.add_argument(
+        "--target_update_every",
+        type=int,
+        default=250,
+        help="Update target network every N training steps",
     )
     parser.add_argument(
         "--epsilon_decay",
@@ -185,10 +212,14 @@ def main() -> None:
         state_size=obs.shape,
         action_size=env.action_space.n,
         replay_memory_size=int(args.replay_memory_size),
+        replay_warmup=(None if args.replay_warmup is None else int(args.replay_warmup)),
         minibatch_size=int(args.minibatch_size),
         epsilon_decay=float(args.epsilon_decay),
         learning_rate=float(args.learning_rate),
         epsilon_min=float(args.epsilon_min),
+        epsilon_start=float(args.epsilon_start),
+        gamma=float(args.gamma),
+        target_update_every=int(args.target_update_every),
     )
 
     initial_info = env.get_game_state()
@@ -206,11 +237,15 @@ def main() -> None:
             config={
                 "learning_rate": agent.learning_rate,
                 "device": str(agent.device),
-                "epsilon": agent.epsilon,
+                "epsilon_start": float(args.epsilon_start),
                 "epsilon_decay": agent.epsilon_decay,
+                "epsilon_min": agent.epsilon_min,
                 "gamma": agent.gamma,
                 "minibatch_size": agent.minibatch_size,
                 "replay_memory_size": agent.replay_memory_size,
+                "replay_warmup": agent.replay_warmup,
+                "train_every": int(args.train_every),
+                "target_update_every": agent.target_update_every,
                 "architecture": "CNN",
                 "episodes": int(args.num_episodes),
                 "steps_per_episode": int(steps_per_episode),

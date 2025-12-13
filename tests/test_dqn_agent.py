@@ -28,6 +28,8 @@ class TestDeepQLearningAgent:
         assert agent.epsilon_min == 0.01
         assert agent.gamma == 0.95
         assert agent.epsilon == 1.0
+        assert agent.replay_warmup == 500
+        assert agent.target_update_every == 250
         assert agent._train_counter == 0
         assert isinstance(agent.replay_memory, deque)
         assert agent.replay_memory.maxlen == 500
@@ -38,10 +40,14 @@ class TestDeepQLearningAgent:
             state_size=(144, 160),
             action_size=6,
             replay_memory_size=1000,
+            replay_warmup=200,
             minibatch_size=32,
             epsilon_decay=0.995,
             learning_rate=0.001,
-            epsilon_min=0.05
+            epsilon_min=0.05,
+            epsilon_start=0.4,
+            gamma=0.9,
+            target_update_every=10,
         )
         
         assert agent.action_size == 6
@@ -50,6 +56,10 @@ class TestDeepQLearningAgent:
         assert agent.epsilon_decay == 0.995
         assert agent.learning_rate == 0.001
         assert agent.epsilon_min == 0.05
+        assert agent.epsilon == 0.4
+        assert agent.gamma == 0.9
+        assert agent.replay_warmup == 200
+        assert agent.target_update_every == 10
         assert agent.replay_memory.maxlen == 1000
 
     def test_device_selection_cpu(self, force_cpu_device):
@@ -224,7 +234,7 @@ class TestDeepQLearningAgent:
 
     def test_train_insufficient_memory(self, force_cpu_device):
         """Test training returns None when insufficient memory"""
-        agent = DeepQLearningAgent(state_size=(144, 160), action_size=4, replay_memory_size=100)
+        agent = DeepQLearningAgent(state_size=(144, 160), action_size=4, replay_memory_size=100, replay_warmup=100)
         
         # Add fewer transitions than required
         for i in range(50):
@@ -235,9 +245,34 @@ class TestDeepQLearningAgent:
         result = agent.train()
         assert result is None
 
+    def test_train_warmup_decoupled_from_replay_size(self, force_cpu_device):
+        """Training should be able to start before replay buffer is full."""
+        agent = DeepQLearningAgent(
+            state_size=(144, 160),
+            action_size=4,
+            replay_memory_size=1000,
+            replay_warmup=32,
+            minibatch_size=32,
+        )
+
+        # Add exactly minibatch_size transitions; should now be trainable.
+        for _ in range(32):
+            state = np.random.randint(0, 255, (144, 160), dtype=np.uint8)
+            transition = Transition(state, 0, 1.0, state, False)
+            agent.update_memory(transition)
+
+        result = agent.train()
+        assert result is not None
+
     def test_train_sufficient_memory(self, force_cpu_device, mock_transitions):
         """Test training with sufficient memory returns loss and Q-values"""
-        agent = DeepQLearningAgent(state_size=(144, 160), action_size=4, replay_memory_size=100, minibatch_size=32)
+        agent = DeepQLearningAgent(
+            state_size=(144, 160),
+            action_size=4,
+            replay_memory_size=100,
+            replay_warmup=32,
+            minibatch_size=32,
+        )
         
         # Fill memory with sufficient transitions
         for transition in mock_transitions:
