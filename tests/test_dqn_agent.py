@@ -2,8 +2,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 from unittest.mock import patch
-from collections import deque
 import pytest
+
+from torchrl.data import ReplayBuffer
 
 import sys
 import os
@@ -31,8 +32,8 @@ class TestDeepQLearningAgent:
         assert agent.replay_warmup == 500
         assert agent.target_update_every == 250
         assert agent._train_counter == 0
-        assert isinstance(agent.replay_memory, deque)
-        assert agent.replay_memory.maxlen == 500
+        assert isinstance(agent.replay_memory, ReplayBuffer)
+        assert agent.replay_memory.storage.max_size == 500
 
     def test_init_custom_parameters(self, force_cpu_device):
         """Test agent initialization with custom parameters"""
@@ -60,7 +61,7 @@ class TestDeepQLearningAgent:
         assert agent.gamma == 0.9
         assert agent.replay_warmup == 200
         assert agent.target_update_every == 10
-        assert agent.replay_memory.maxlen == 1000
+        assert agent.replay_memory.storage.max_size == 1000
 
     def test_device_selection_cpu(self, force_cpu_device):
         """Test device selection defaults to CPU when no GPU available"""
@@ -195,7 +196,7 @@ class TestDeepQLearningAgent:
         agent.update_memory(mock_transition)
         
         assert len(agent.replay_memory) == initial_length + 1
-        assert agent.replay_memory[-1] == mock_transition
+        assert agent.replay_memory.sample(1)[0] == mock_transition
 
     def test_update_memory_capacity_limit(self, force_cpu_device, mock_transitions):
         """Test replay memory respects capacity limit"""
@@ -206,8 +207,10 @@ class TestDeepQLearningAgent:
             agent.update_memory(transition)
         
         assert len(agent.replay_memory) == 50
-        # Check that oldest transitions were removed (FIFO behavior)
-        assert agent.replay_memory[0] == mock_transitions[-50]
+        # Buffer should not grow beyond capacity.
+        stored = list(agent.replay_memory.storage._storage)
+        assert not any(t is mock_transitions[0] for t in stored)
+        assert any(t is mock_transitions[-1] for t in stored)
 
     def test_update_target_network(self, force_cpu_device):
         """Test target network weight synchronization"""
@@ -372,7 +375,7 @@ class TestDeepQLearningAgent:
         agent.update_memory(t2)
 
         # Make sampling deterministic.
-        monkeypatch.setattr('random.sample', lambda seq, k: [t1, t2])
+        monkeypatch.setattr(agent, '_sample_minibatch', lambda: [t1, t2])
 
         loss, mean_q = agent.train()
 

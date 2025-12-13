@@ -5,7 +5,11 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import random
-from collections import deque, namedtuple
+from collections import namedtuple
+
+from torchrl.data import ReplayBuffer
+from torchrl.data.replay_buffers.samplers import RandomSampler
+from torchrl.data.replay_buffers.storages import ListStorage
 
 Transition = namedtuple('Transition',
                         ('state', 'action', 'reward', 'next_state', 'done'))
@@ -33,7 +37,14 @@ class DeepQLearningAgent:
         self.state_size = state_size
         self.action_size = action_size
         self.replay_memory_size = replay_memory_size
-        self.replay_memory = deque(maxlen=self.replay_memory_size)
+        # TorchRL replay buffer with a Python-object storage.
+        # We use an identity collate_fn so sampling returns a plain list of
+        # Transition-like objects (rather than attempting to stack).
+        self.replay_memory = ReplayBuffer(
+            storage=ListStorage(max_size=self.replay_memory_size),
+            sampler=RandomSampler(),
+            collate_fn=lambda x: x,
+        )
         self.gamma = float(gamma)    # discount rate
         self.epsilon = float(epsilon_start)   # exploration rate
         self.epsilon_min = epsilon_min
@@ -136,7 +147,10 @@ class DeepQLearningAgent:
         Update the replay memory with the latest transition tuple
         - state, action, reward, next_state, done
         """
-        self.replay_memory.append(transition)
+        self.replay_memory.add(transition)
+
+    def _sample_minibatch(self):
+        return self.replay_memory.sample(self.minibatch_size)
 
     def update_target_network(self):
         """
@@ -157,7 +171,7 @@ class DeepQLearningAgent:
         if len(self.replay_memory) < int(min_required):
             return
 
-        minibatch = random.sample(self.replay_memory, self.minibatch_size)
+        minibatch = self._sample_minibatch()
 
         # Reviewing algorithm from https://www.youtube.com/watch?v=qfovbG84EBg&t=335s
         # TODO: Double check normalization of 255
