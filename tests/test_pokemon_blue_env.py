@@ -11,6 +11,10 @@ class FakeScreen:
     def __init__(self, image: Image.Image):
         self.image = image
 
+    @property
+    def ndarray(self):
+        return np.asarray(self.image)
+
 
 class FakePyBoy:
     instances = []

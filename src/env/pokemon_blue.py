@@ -123,11 +123,37 @@ class PokemonBlueEnv(gym.Env):
         Returns:
             numpy array of screen pixels
         """
-        screen = self.pyboy.screen.image
-        gray_screen = screen.convert('L')  # Convert to grayscale
-        screen_array = np.array(gray_screen)
-        screen_array = screen_array.reshape((1, 144, 160))
-        return screen_array
+        screen = self.pyboy.screen
+
+        # Fast path: PyBoy exposes a NumPy framebuffer.
+        fb = getattr(screen, "ndarray", None)
+        if fb is not None:
+            frame = np.asarray(fb)
+
+            # Handle both (H, W, C) and (W, H, C) variants defensively.
+            if frame.ndim == 3 and frame.shape[0] == 160 and frame.shape[1] == 144:
+                frame = np.transpose(frame, (1, 0, 2))
+            if frame.ndim == 2 and frame.shape[0] == 160 and frame.shape[1] == 144:
+                frame = np.transpose(frame, (1, 0))
+
+            if frame.ndim == 3:
+                # Convert RGB(A) -> grayscale using integer luma approximation.
+                rgb = frame[..., :3].astype(np.uint16, copy=False)
+                gray = (rgb[..., 0] * 77 + rgb[..., 1] * 150 + rgb[..., 2] * 29) >> 8
+                gray = gray.astype(np.uint8, copy=False)
+            else:
+                gray = frame.astype(np.uint8, copy=False)
+
+            if gray.shape != (144, 160):
+                gray = gray.reshape((144, 160))
+
+            return gray[None, :, :]
+
+        # Fallback: PIL-based path.
+        pil_img = screen.image
+        gray_screen = pil_img.convert('L')  # Convert to grayscale
+        screen_array = np.asarray(gray_screen, dtype=np.uint8)
+        return screen_array[None, :, :]
 
     def _compute_reward(self):
         """
