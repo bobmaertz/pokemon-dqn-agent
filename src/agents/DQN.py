@@ -164,17 +164,22 @@ class DeepQLearningAgent:
         current_states_np = np.asarray([transition.state for transition in minibatch], dtype=np.float32)
         if current_states_np.ndim == 3:
             current_states_np = current_states_np[:, None, :, :]  # (B, 1, H, W)
-        current_states = torch.from_numpy(current_states_np / 255.0).to(self.device)
-        actions = torch.LongTensor(
-            [transition.action for transition in minibatch]).to(self.device)
-        rewards = torch.FloatTensor(
-            [transition.reward for transition in minibatch]).to(self.device)
+        current_states_np /= 255.0
+        current_states = torch.from_numpy(current_states_np).to(self.device)
+
+        actions_np = np.fromiter((t.action for t in minibatch), dtype=np.int64, count=self.minibatch_size)
+        rewards_np = np.fromiter((t.reward for t in minibatch), dtype=np.float32, count=self.minibatch_size)
+        dones_np = np.fromiter((t.done for t in minibatch), dtype=np.float32, count=self.minibatch_size)
+
+        actions = torch.from_numpy(actions_np).to(self.device)
+        rewards = torch.from_numpy(rewards_np).to(self.device)
+        dones = torch.from_numpy(dones_np).to(self.device)
+
         next_states_np = np.asarray([transition.next_state for transition in minibatch], dtype=np.float32)
         if next_states_np.ndim == 3:
             next_states_np = next_states_np[:, None, :, :]  # (B, 1, H, W)
-        next_states = torch.from_numpy(next_states_np / 255.0).to(self.device)
-        dones = torch.FloatTensor(
-            [transition.done for transition in minibatch]).to(self.device)
+        next_states_np /= 255.0
+        next_states = torch.from_numpy(next_states_np).to(self.device)
 
         # Compute Q-values for current states
         curr_q = self.policy_model(current_states)
